@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -11,6 +12,47 @@ import (
 	"strings"
 	"time"
 )
+
+// Doreload and other flags should probably be part of a config accessible across build.
+// It gets set using server flags.
+var Doreload bool
+
+// inject wherever/however, this is just to get it working.
+var scr = []byte(`<script>
+let socket;
+
+window.onload = () => {
+  console.debug("onload");
+  socket.send("loaded");
+
+};
+document.addEventListener("DOMContentLoaded", () => {
+	socket = new WebSocket('ws://' + window.location.host + '/reload');
+	console.debug('ws://' + window.location.host + '/reload');
+	  
+	socket.onmessage = function (event) {
+	  var datastr = event.data.split(":")[0];
+	   if (datastr === 'reload'){
+		  console.debug("reloading")
+		  window.location.reload();
+		
+		  
+	   }
+	};
+  
+  
+	socket.onopen = function() {
+	  console.debug("connected");
+	  
+	}
+  
+	socket.onclose = function(e) {
+	  console.debug("connection closed (" + e.code + ")");
+	}
+  
+  });
+</script></body>
+`)
 
 type content struct {
 	contentType      string
@@ -251,6 +293,10 @@ func createHTML(currentContent content) error {
 	renderedHTMLStr := renderedHTML.String()
 	// Convert the string to byte array that can be written to file system.
 	htmlBytes := []byte(renderedHTMLStr)
+	if Doreload {
+		htmlBytes = bytes.Replace(htmlBytes, []byte("</body>"), scr, 1)
+
+	}
 	// Create any folders need to write file.
 	if err := os.MkdirAll(strings.TrimSuffix(currentContent.contentDest, "/index.html"), os.ModePerm); err != nil {
 		return fmt.Errorf("couldn't create dirs in createHTML: %w", err)
