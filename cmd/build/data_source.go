@@ -66,6 +66,9 @@ type content struct {
 	contentPagerNums []string
 }
 
+// Setup regex to find pagination and a leading forward slash.
+var rePaginateFS = regexp.MustCompile(`/:paginate\((.*?)\)`)
+
 // DataSource builds json list from "content/" directory.
 func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir string) error {
 
@@ -156,19 +159,17 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 					}
 				}
 
-				// Setup regex to find pagination and a leading forward slash.
-				rePaginate := regexp.MustCompile(`/:paginate\((.*?)\)`)
 				// Initialize vars for path with replacement patterns still intact.
 				var pagerPath string
 				var pagerDestPath string
 				// If there is a /:paginate() replacement found.
-				if rePaginate.MatchString(path) {
+				if rePaginateFS.MatchString(path) {
 					// Save path before slugifying to preserve pagination.
 					pagerPath = path
 					// Get Destination path before slugifying to preserve pagination.
 					pagerDestPath = buildPath + path + "/index.html"
 					// Remove /:pagination()
-					path = rePaginate.ReplaceAllString(path, "")
+					path = rePaginateFS.ReplaceAllString(path, "")
 					// If paginating the homepage, the forward slash shouldn't be removed.
 					if path == "" {
 						// Add the forward slash back for the index page.

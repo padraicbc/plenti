@@ -129,7 +129,6 @@ func Build() {
 	} else {
 
 		// Prep the client SPA.
-
 		common.CheckErr(build.Client(buildPath, tempBuildDir, ejectedPath))
 
 		// Build JSON from "content/" directory.

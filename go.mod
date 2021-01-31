@@ -3,7 +3,7 @@ module plenti
 go 1.14
 
 require (
-	github.com/MakeNowJust/heredoc/v2 v2.0.1
+	github.com/MakeNowJust/heredoc/v2 v2.0.1// indirect
 	github.com/briandowns/spinner v1.12.0
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/gerald1248/httpscerts v0.0.0-20170315065746-2c461ceb29ee
@@ -24,6 +24,7 @@ require (
 	github.com/spf13/viper v1.7.1
 	github.com/stretchr/testify v1.6.1 // indirect
 	golang.org/x/net v0.0.0-20201021035429-f5854403a974
+	golang.org/x/sync v0.0.0-20190423024810-112230192c58
 	gopkg.in/ini.v1 v1.57.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776 // indirect
 	rogchap.com/v8go v0.2.0
