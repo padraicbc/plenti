@@ -18,6 +18,19 @@ func NpmDefaults(tempBuildDir string) error {
 	Log("\nChecking if 'node_modules' directory exists.")
 
 	destPath := tempBuildDir + "node_modules"
+	if common.UseMemFS {
+		if common.MapFS[destPath].B != nil {
+			return nil
+		}
+		for file, content := range generated.Defaults_node_modules {
+			// Make file relative to where CLI is executed
+			file = destPath + "/" + file
+			// Create the directories needed for the current file
+			common.MapFS[file] = common.FData{B: content}
+
+		}
+		return nil
+	}
 
 	if _, err := os.Stat(destPath); os.IsNotExist(err) {
 		for file, content := range generated.Defaults_node_modules {

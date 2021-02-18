@@ -3,6 +3,7 @@ package build
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"plenti/common"
@@ -32,6 +33,10 @@ func AssetsCopy(buildPath string, tempBuildDir string) error {
 		}
 		destPath := buildPath + "/" + strings.TrimPrefix(assetPath, tempBuildDir)
 		if assetFileInfo.IsDir() {
+			if common.UseMemFS {
+				return nil
+			}
+
 			// Make directory if it doesn't exist.
 			// Move on to next path.
 			if err = os.MkdirAll(destPath, os.ModePerm); err != nil {
@@ -46,6 +51,17 @@ func AssetsCopy(buildPath string, tempBuildDir string) error {
 
 		}
 		defer from.Close()
+		if common.UseMemFS {
+			from, err := ioutil.ReadAll(from)
+			if err != nil {
+				return fmt.Errorf("Could not copy asset %s : %w%s", assetPath, err, common.Caller())
+
+			}
+			common.MapFS[destPath] = common.FData{Hash: common.CRC32Hasher(from), B: from}
+
+			copiedSourceCounter++
+			return nil
+		}
 
 		to, err := os.Create(destPath)
 		if err != nil {

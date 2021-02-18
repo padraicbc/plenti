@@ -89,24 +89,30 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 	Log("\nGathering data source from 'content/' folder")
 
 	contentJSPath := buildPath + "/spa/ejected/content.js"
-	if err := os.MkdirAll(buildPath+"/spa/ejected", os.ModePerm); err != nil {
-		return err
-	}
 
+	// no dirs needed for mem
+	if common.UseMemFS {
+		common.MapFS[contentJSPath] = common.FData{B: []byte(`const contentSource = [`)}
+	} else {
+
+		if err := os.MkdirAll(buildPath+"/spa/ejected", os.ModePerm); err != nil {
+			return err
+		}
+		// Start the new content.js file.
+		err := ioutil.WriteFile(contentJSPath, []byte(`const contentSource = [`), 0755)
+		if err != nil {
+			fmt.Printf("Unable to write content.js file: %v", err)
+			return err
+		}
+
+	}
 	// Set up counter for logging output.
 	contentFileCounter := 0
 	// Start the string that will be used for allContent object.
 	allContentStr := "["
 	// Store each content file in array we can iterate over for creating static html.
 	allContent := []content{}
-
-	// Start the new content.js file.
-	err := ioutil.WriteFile(contentJSPath, []byte(`const contentSource = [`), 0755)
-	if err != nil {
-		fmt.Printf("Unable to write content.js file: %v", err)
-		return err
-	}
-
+	// todo: hash content
 	// Go through all sub directories in "content/" folder.
 	contentFilesErr := filepath.Walk(tempBuildDir+"content", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -214,7 +220,7 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 					"\"fields\": " + fileContentStr + "\n}"
 
 				// Write to the content.js client data source file.
-				if err = writeContentJS(contentJSPath, contentDetailsStr+","); err != nil {
+				if err := writeContentJS(contentJSPath, contentDetailsStr+","); err != nil {
 					return fmt.Errorf("file: %s %w%s", contentJSPath, err, common.Caller())
 				}
 
@@ -252,11 +258,11 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 
 	for _, currentContent := range allContent {
 
-		if err = createProps(currentContent, allContentStr); err != nil {
+		if err := createProps(currentContent, allContentStr); err != nil {
 			return err
 		}
 
-		if err = createHTML(currentContent); err != nil {
+		if err := createHTML(currentContent); err != nil {
 			return err
 		}
 
@@ -314,6 +320,11 @@ func createHTML(currentContent content) error {
 	if Doreload {
 		htmlBytes = bytes.Replace(htmlBytes, []byte("</body>"), scr, 1)
 
+	}
+	if common.UseMemFS {
+		// end up with things like  public//index.html
+		common.MapFS[common.NormPaths(currentContent.contentDest)] = common.FData{B: htmlBytes}
+		return nil
 	}
 	// Create any folders need to write file.
 	if err := os.MkdirAll(strings.TrimSuffix(currentContent.contentDest, "/index.html"), os.ModePerm); err != nil {
@@ -427,6 +438,13 @@ func getTotalPages(paginationVar string) (int, error) {
 }
 
 func writeContentJS(contentJSPath string, contentDetailsStr string) error {
+	// just mem
+
+	if common.UseMemFS {
+		// ok to append as it gets created each build
+		common.MapFS[contentJSPath] = common.FData{B: append(common.MapFS[contentJSPath].B, []byte(contentDetailsStr)...)}
+		return nil
+	}
 	// Create new content.js file if it doesn't already exist, or add to it if it does.
 	contentJSFile, err := os.OpenFile(contentJSPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

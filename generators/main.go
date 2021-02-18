@@ -50,9 +50,8 @@ func generate(name string) error {
 
 	if err = filepath.Walk(name,
 		func(path string, info os.FileInfo, err error) error {
-
 			if err != nil {
-				return fmt.Errorf("can't stat %s: %w", path, err)
+				return err
 			}
 			if !info.IsDir() {
 				// Get the contents of the current file.

@@ -20,6 +20,20 @@ func EjectTemp(tempBuildDir string) ([]string, string, error) {
 	ejectedPath := tempBuildDir + "ejected"
 
 	tempFiles := []string{}
+	if common.UseMemFS {
+		// Loop through generated ejected file defaults.
+		for file, content := range generated.Ejected {
+			filePath := ejectedPath + file
+
+			Log("Temp writing '" + file + "' file.")
+			// Create the current default file
+			common.MapFS[filePath] = common.FData{B: content, Hash: common.CRC32Hasher(content)}
+
+			tempFiles = append(tempFiles, filePath)
+
+		}
+		return tempFiles, ejectedPath, nil
+	}
 
 	// Loop through generated ejected file defaults.
 	for file, content := range generated.Ejected {

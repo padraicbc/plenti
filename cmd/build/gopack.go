@@ -10,6 +10,7 @@ import (
 	"plenti/common"
 	"plenti/readers"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -42,6 +43,17 @@ func Gopack(buildPath string) error {
 
 				// Remove "node_modules" from path and add "web_modules".
 				modulePath = gopackDir + strings.Replace(modulePath, "node_modules", "", 1)
+				// in memory so just store
+				if common.UseMemFS {
+					b, err := ioutil.ReadAll(from)
+					if err != nil {
+						return fmt.Errorf("Could not open source .mjs file for copying: %w%s", err, common.Caller())
+					}
+					common.MapFS[strings.TrimSuffix(modulePath, filepath.Ext(modulePath))+".js"] = common.FData{B: b}
+
+					return nil
+				}
+
 				// Create any subdirectories need to write file to "web_modules" destination.
 				if err = os.MkdirAll(filepath.Dir(modulePath), os.ModePerm); err != nil {
 					return fmt.Errorf("Could not create subdirectories %s: %w%s", filepath.Dir(modulePath), err, common.Caller())
@@ -64,6 +76,153 @@ func Gopack(buildPath string) error {
 		if nodeModuleErr != nil {
 			return fmt.Errorf("Could not get node module: %w%s", nodeModuleErr, common.Caller())
 		}
+
+	}
+	if common.UseMemFS {
+		keys := []string{}
+
+		for k := range common.MapFS {
+			keys = append(keys, k)
+		}
+		// want to start wirth shortest so we mimic starting at subdir
+		sort.Slice(keys, func(i, j int) bool {
+			return len(keys[i]) < len(keys[j])
+		})
+
+		for convertPath, data := range common.MapFS {
+			contentBytes := data.B
+
+			if !strings.HasPrefix(convertPath, buildPath+"/spa") {
+				continue
+			}
+
+			// Match dynamic import statments, e.g. import("") or import('').
+			reDynamicImport := regexp.MustCompile(`import\((?:'|").*(?:'|")\)`)
+			// Created byte array of all dynamic imports in the current file.
+
+			dynamicImportPaths := reDynamicImport.FindAll(contentBytes, -1)
+			for _, dynamicImportPath := range dynamicImportPaths {
+
+				// Inside the dynamic import change any svelte file extensions to reference regular javascript files.
+				fixedImportPath := bytes.Replace(dynamicImportPath, []byte(".svelte"), []byte(".js"), 1)
+				// Add the updated import back into the file contents for writing later.
+				contentBytes = bytes.Replace(contentBytes, dynamicImportPath, fixedImportPath, 1)
+
+			}
+
+			// Find any import statement in the file (including multiline imports).
+			// () = brackets for grouping
+			// \s = space
+			// .* = any character
+			// | = or statement
+			// \n = newline
+			// {0,} = repeat any number of times
+			// \{ = just a closing curly bracket (escaped)
+			reStaticImport := regexp.MustCompile(`import(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
+			reStaticExport := regexp.MustCompile(`export(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
+			// Get all the import statements.
+			staticImportStatements := reStaticImport.FindAll(contentBytes, -1)
+			// Get all the export statements.
+			staticExportStatements := reStaticExport.FindAll(contentBytes, -1)
+			// Get all import and export statements.
+			allStaticStatements := append(staticImportStatements, staticExportStatements...)
+			for _, staticStatement := range allStaticStatements {
+				// Find the path specifically (part between single or double quotes).
+				rePath := regexp.MustCompile(`(?:'|").*(?:'|")`)
+				// Get path from the full import/export statement.
+				pathBytes := rePath.Find(staticStatement)
+				// Convert path to a string.
+				pathStr := string(pathBytes)
+				// Remove single or double quotes around path.
+				pathStr = strings.Trim(pathStr, `'"`)
+				// Make the path relative to the file that is specifying it as an import/export.
+				fullPath := filepath.Dir(convertPath) + "/" + pathStr
+				// Intialize the path that we are replacing.
+				var foundPath string
+				// Convert .svelte file extensions to .js so the browser can read them.
+				if filepath.Ext(fullPath) == ".svelte" {
+					fullPath = strings.Replace(fullPath, ".svelte", ".js", 1)
+					foundPath = fullPath
+				}
+
+				// If the import/export points to a path that exists and it is a .js file (imports must reference the file specifically) then we don't need to convert anything.
+				if common.MapFS[fullPath].B != nil && filepath.Ext(fullPath) == ".js" {
+					// error?
+					Log("Skipping converting import/export in " + convertPath + " because import/export is valid: " + string(staticStatement))
+				} else if pathStr[:1] == "." {
+					// If the import/export path starts with a dot (.) or double dot (..) look for the file it's trying to import from this relative path.
+					// findRelativePathErr := vfsutil.Walk(common.MapFS(common.MapFS), fullPath, func(relativePath string, relativePathFileInfo os.FileInfo, err error) error {
+					var file string
+					if strings.Contains(fullPath, "/../") {
+						// public/spa/web_modules/svelte/animate/../easing
+						// go back one
+						spl := strings.Split(fullPath, "/../")
+						ppre, fl := spl[0], spl[1]
+						pre := ppre[:strings.LastIndex(ppre, "/")]
+						file = fmt.Sprintf("%s/%s", pre, fl)
+
+					} else if strings.Contains(fullPath, "/./") {
+						file = strings.Replace(fullPath, "/./", "/", 1)
+					}
+					if len(file) > 0 {
+
+						for _, k := range keys {
+
+							if (strings.HasPrefix(k, file)) && strings.HasSuffix(k, ".js") {
+
+								foundPath = k
+
+								break
+							}
+						}
+					}
+
+				} else {
+					// todo: check why + pathStr was there
+					// A named import/export is being used, look for this in "web_modules/" dir.
+					namedPath := buildPath + "/spa/web_modules/" + pathStr
+
+					// Check all files in the current directory first.
+
+					if foundPath == "" {
+
+						for _, k := range keys {
+
+							if strings.HasPrefix(k, namedPath) && strings.HasSuffix(k, ".js") {
+
+								foundPath = k
+								break
+
+							}
+						}
+
+					}
+				}
+
+				if foundPath != "" {
+					// Remove "public" build dir from path.
+					replacePath := strings.Replace(foundPath, buildPath, "", 1)
+					// Wrap path in quotes.
+					replacePath = "'" + replacePath + "'"
+					// Convert string path to bytes.
+					replacePathBytes := []byte(replacePath)
+					// Find the specific import statement we're replacing.
+					reFoundImport := regexp.MustCompile(string(staticStatement))
+
+					// Actually replace the path to the dependency in the source content.
+					contentBytes = reFoundImport.ReplaceAll(contentBytes, rePath.ReplaceAll(staticStatement, rePath.ReplaceAll(pathBytes, replacePathBytes)))
+
+				}
+
+			}
+
+			// Overwrite the old file with the new content that contains the updated import path.
+			// issue with removing prefix in serve and oveewriting with so we remove any  with buildDir.
+			delete(common.MapFS, convertPath)
+			common.MapFS[common.NormPaths(convertPath)] = common.FData{B: contentBytes}
+
+		}
+		return nil
 
 	}
 	convertErr := filepath.Walk(buildPath+"/spa", func(convertPath string, convertFileInfo os.FileInfo, err error) error {

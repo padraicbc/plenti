@@ -31,6 +31,7 @@ func setBuildDir(siteConfig readers.SiteConfig) string {
 		// If dir flag exists, use it.
 		buildDir = BuildDirFlag
 	}
+
 	return buildDir
 }
 
@@ -55,13 +56,13 @@ func Build() error {
 	build.CheckBenchmarkFlag(BenchmarkFlag)
 	var err error
 	// Handle panic when someone tries building outside of a valid Plenti site.
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Println("Please create a valid Plenti project or fix your app structure before trying to run this command again.")
-			fmt.Printf("Error: %v \n\n", r)
-			err = fmt.Errorf("panic recovered in Build: %v", r)
-		}
-	}()
+	// defer func() {
+	// 	if r := recover(); r != nil {
+	// 		fmt.Println("Please create a valid Plenti project or fix your app structure before trying to run this command again.")
+	// 		fmt.Printf("Error: %v \n\n", r)
+	// 		err = fmt.Errorf("panic recovered in Build: %v", r)
+	// 	}
+	// }()
 
 	// Get settings from config file.
 	siteConfig, _ := readers.GetSiteConfig(".")
@@ -91,25 +92,27 @@ func Build() error {
 
 	// Get the full path for the build directory of the site.
 	buildPath := filepath.Join(".", buildDir)
+	// only applies to disk
+	if !common.UseMemFS {
+		// Clear out any previous build dir of the same name.
+		if _, buildPathExistsErr := os.Stat(buildPath); buildPathExistsErr == nil {
+			build.Log("Removing old '" + buildPath + "' build directory")
+			if err = common.CheckErr(os.RemoveAll(buildPath)); err != nil {
+				return err
+			}
 
-	// Clear out any previous build dir of the same name.
-	if _, buildPathExistsErr := os.Stat(buildPath); buildPathExistsErr == nil {
-		build.Log("Removing old '" + buildPath + "' build directory")
-		if err = common.CheckErr(os.RemoveAll(buildPath)); err != nil {
-			return err
 		}
 
-	}
+		// Create the buildPath directory.
+		if err := os.MkdirAll(buildPath, os.ModePerm); err != nil {
+			// bail on error in build
+			if err = common.CheckErr(fmt.Errorf("Unable to create \"%v\" build directory: %s", err, buildDir)); err != nil {
+				return err
+			}
 
-	// Create the buildPath directory.
-	if err := os.MkdirAll(buildPath, os.ModePerm); err != nil {
-		// bail on error in build
-		if err = common.CheckErr(fmt.Errorf("Unable to create \"%v\" build directory: %s", err, buildDir)); err != nil {
-			return err
 		}
-
+		build.Log("Creating '" + buildDir + "' build directory")
 	}
-	build.Log("Creating '" + buildDir + "' build directory")
 
 	// Add core NPM dependencies if node_module folder doesn't already exist.
 	if err = common.CheckErr(build.NpmDefaults(tempBuildDir)); err != nil {
@@ -172,7 +175,7 @@ func Build() error {
 		if err = common.CheckErr(build.ThemesClean(tempBuildDir)); err != nil {
 			return err
 		}
-	} else {
+	} else if !common.UseMemFS {
 		// If no theme, just delete any ejectable files that the user didn't manually eject
 		if err = common.CheckErr(build.EjectClean(tempFiles, ejectedPath)); err != nil {
 			return err

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"plenti/cmd/build"
@@ -58,6 +59,7 @@ var serveCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 
 		s := spinner.New(spinner.CharSets[35], 100*time.Millisecond)
+		common.QuitOnErr = false
 
 		s.Suffix = " Building..."
 		s.Color("blue")
@@ -74,11 +76,36 @@ var serveCmd = &cobra.Command{
 
 		// Check flags and config for directory to build to
 		buildDir := setBuildDir(siteConfig)
+		var fs http.Handler
+		// Point to folder containing the built site
+		if common.UseMemFS {
 
-		// Check that the build directory exists
-		if _, err := os.Stat(buildDir); os.IsNotExist(err) {
-			fmt.Printf("The \"%v\" build directory does not exist, check your plenti.json file.\n", buildDir)
-			log.Fatal(err)
+			fs = http.FileServer(common.NewFS())
+
+			keys := []string{}
+			for k := range common.MapFS {
+				keys = append(keys, k)
+			}
+			for k := range common.MapFS {
+				// trim the build dir and any leading /
+				if strings.HasPrefix(k, buildDir) {
+					// remove builddir so served as relative  to it
+					k2 := common.NormPaths(k)
+					common.MapFS[k2] = common.MapFS[k]
+					delete(common.MapFS, k)
+
+				}
+
+			}
+
+		} else {
+
+			// Check that the build directory exists
+			if _, err := os.Stat(buildDir); os.IsNotExist(err) {
+				fmt.Printf("The \"%v\" build directory does not exist, check your plenti.json file.\n", buildDir)
+				log.Fatal(err)
+			}
+			fs = http.FileServer(http.Dir(buildDir))
 		}
 		// Watch filesystem for changes.
 		gowatch(buildDir)
@@ -87,13 +114,10 @@ var serveCmd = &cobra.Command{
 			http.Handle("/reload", websocket.Handler(wshandler))
 
 		}
-		common.QuitOnErr = false
+
 		fmt.Printf("\nServing site from your \"%v\" directory.\n", buildDir)
 
-		// Point to folder containing the built site
-		fs := http.FileServer(http.Dir(buildDir))
 		http.Handle("/", fs)
-		// fs := http.FileServer(http.Dir("assets/"))
 
 		// Check flags and config for local server port
 		port := setPort(siteConfig)
@@ -132,6 +156,7 @@ func init() {
 	serveCmd.Flags().BoolVarP(&BenchmarkFlag, "benchmark", "b", false, "display build time statistics")
 	serveCmd.Flags().BoolVarP(&SSLFlag, "ssl", "s", false, "ssl/tls encryption to serve localhost over https")
 	serveCmd.Flags().BoolVarP(&build.Doreload, "live-reload", "L", false, "Enable live reload")
+	serveCmd.Flags().BoolVarP(&common.UseMemFS, "in-memory", "M", false, "Use in memory filesystem")
 
 }
 
