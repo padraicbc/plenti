@@ -26,7 +26,7 @@ func Client(buildPath string, tempBuildDir string, ejectedPath string) error {
 	Log("\nCompiling client SPA with svelte")
 
 	stylePath := buildPath + "/spa/bundle.css"
-	common.MapFS[stylePath] = common.FData{}
+	common.Set(stylePath, &common.FData{})
 
 	// Initialize string for layout.js component list.
 	var allComponentsStr string
@@ -159,7 +159,7 @@ func Client(buildPath string, tempBuildDir string, ejectedPath string) error {
 	}
 	if common.UseMemFS {
 		b := []byte(allComponentsStr)
-		common.MapFS[buildPath+"/spa/ejected/layout.js"] = common.FData{Hash: common.CRC32Hasher(b), B: b}
+		common.Set(buildPath+"/spa/ejected/layout.js", &common.FData{Hash: common.CRC32Hasher(b), B: b})
 
 	} else {
 

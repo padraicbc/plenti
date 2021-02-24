@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/tools/godoc/vfs"
 )
@@ -17,17 +18,55 @@ import (
 func NewFS() *httpFS {
 	// Verify all provided paths are relative before proceeding.
 	var pathsWithLeadingSlash []string
-	for p := range MapFS {
+	for p := range mapFS {
 		if strings.HasPrefix(p, "/") {
 			pathsWithLeadingSlash = append(pathsWithLeadingSlash, p)
 		}
 	}
 
-	return &httpFS{FS: mapFST(MapFS)}
+	return &httpFS{FS: mapFST(mapFS)}
 }
 
 type httpFS struct {
 	FS mapFST
+}
+
+// Basically the inverse of StripPrefix logic.
+// This is an ugly hack until we separate concerns and the filesystem only holds files the buildDir files.
+// There is an overlap with names that breaks things as one can overwrite the other, "public"+... avoids this.
+// This will break for now if you change from public naming convention.
+func (h *httpFS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	upath := strings.Trim(r.URL.Path, "/")
+	upath = "public/" + upath
+	if upath == "public/" {
+		upath += "index.html"
+	}
+	var f io.ReadSeeker
+	var err error
+
+	// a "dir" so see if index.html exists
+	if !strings.Contains(upath, ".") {
+		f, err = h.Open(upath + "/index.html")
+		if err != nil {
+
+			msg, code := toHTTPError(err)
+			http.Error(w, msg, code)
+			return
+		}
+	} else {
+		// .js etc..
+		f, err = h.Open(upath)
+		if err != nil {
+
+			msg, code := toHTTPError(err)
+			http.Error(w, msg, code)
+			return
+
+		}
+	}
+
+	http.ServeContent(w, r, upath, time.Time{}, f)
 }
 
 func (h *httpFS) Open(name string) (http.File, error) {
@@ -40,6 +79,7 @@ func (h *httpFS) Open(name string) (http.File, error) {
 	if fi.IsDir() {
 		return &httpDir{h.FS, name, nil}, nil
 	}
+
 	f, err := h.FS.Open(name)
 	if err != nil {
 		return nil, err
@@ -101,4 +141,15 @@ type httpFile struct {
 func (h *httpFile) Stat() (os.FileInfo, error) { return h.FS.Stat(h.name) }
 func (h *httpFile) Readdir(int) ([]os.FileInfo, error) {
 	return nil, fmt.Errorf("cannot Readdir from file %s", h.name)
+}
+
+func toHTTPError(err error) (msg string, httpStatus int) {
+	if os.IsNotExist(err) {
+		return "404 page not found", http.StatusNotFound
+	}
+	if os.IsPermission(err) {
+		return "403 Forbidden", http.StatusForbidden
+	}
+	// Default:
+	return "500 Internal Server Error", http.StatusInternalServerError
 }

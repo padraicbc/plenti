@@ -16,9 +16,6 @@ import (
 var QuitOnErr bool
 var lock uint32
 
-// UseMemFS determines if local dev files are stored on disk or in memory
-var UseMemFS = false
-
 // IsBuilding tells us if already in a build.
 // if true then already at 1  0 != 1
 func IsBuilding() bool {
@@ -91,9 +88,4 @@ func isV8err(err error) (string, bool) {
 	}
 	return err.Error(), false
 
-}
-
-// NormPaths fixes things like public//index.html and removes the build prefix so the map reads work
-func NormPaths(s string) string {
-	return strings.TrimPrefix(strings.ReplaceAll(s, "//", "/"), "public/")
 }

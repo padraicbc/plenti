@@ -92,7 +92,7 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 
 	// no dirs needed for mem
 	if common.UseMemFS {
-		common.MapFS[contentJSPath] = common.FData{B: []byte(`const contentSource = [`)}
+		common.Set(contentJSPath, &common.FData{B: []byte(`const contentSource = [`)})
 	} else {
 
 		if err := os.MkdirAll(buildPath+"/spa/ejected", os.ModePerm); err != nil {
@@ -322,8 +322,7 @@ func createHTML(currentContent content) error {
 
 	}
 	if common.UseMemFS {
-		// end up with things like  public//index.html
-		common.MapFS[common.NormPaths(currentContent.contentDest)] = common.FData{B: htmlBytes}
+		common.Set(currentContent.contentDest, &common.FData{B: htmlBytes})
 		return nil
 	}
 	// Create any folders need to write file.
@@ -439,10 +438,9 @@ func getTotalPages(paginationVar string) (int, error) {
 
 func writeContentJS(contentJSPath string, contentDetailsStr string) error {
 	// just mem
-
 	if common.UseMemFS {
 		// ok to append as it gets created each build
-		common.MapFS[contentJSPath] = common.FData{B: append(common.MapFS[contentJSPath].B, []byte(contentDetailsStr)...)}
+		common.Set(contentJSPath, &common.FData{B: append(common.Get(contentJSPath).B, []byte(contentDetailsStr)...)})
 		return nil
 	}
 	// Create new content.js file if it doesn't already exist, or add to it if it does.

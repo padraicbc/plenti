@@ -51,13 +51,14 @@ func AssetsCopy(buildPath string, tempBuildDir string) error {
 
 		}
 		defer from.Close()
+
 		if common.UseMemFS {
 			from, err := ioutil.ReadAll(from)
 			if err != nil {
 				return fmt.Errorf("Could not copy asset %s : %w%s", assetPath, err, common.Caller())
 
 			}
-			common.MapFS[destPath] = common.FData{Hash: common.CRC32Hasher(from), B: from}
+			common.Set(destPath, &common.FData{Hash: common.CRC32Hasher(from), B: from})
 
 			copiedSourceCounter++
 			return nil

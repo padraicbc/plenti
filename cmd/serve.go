@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"plenti/cmd/build"
@@ -80,23 +79,7 @@ var serveCmd = &cobra.Command{
 		// Point to folder containing the built site
 		if common.UseMemFS {
 
-			fs = http.FileServer(common.NewFS())
-
-			keys := []string{}
-			for k := range common.MapFS {
-				keys = append(keys, k)
-			}
-			for k := range common.MapFS {
-				// trim the build dir and any leading /
-				if strings.HasPrefix(k, buildDir) {
-					// remove builddir so served as relative  to it
-					k2 := common.NormPaths(k)
-					common.MapFS[k2] = common.MapFS[k]
-					delete(common.MapFS, k)
-
-				}
-
-			}
+			fs = common.NewFS()
 
 		} else {
 

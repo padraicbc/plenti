@@ -2,7 +2,6 @@ package build
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"plenti/common"
@@ -10,6 +9,28 @@ import (
 	"strings"
 
 	"rogchap.com/v8go"
+)
+
+var (
+	// Regex match static import statements.
+	reStaticImport = regexp.MustCompile(`import\s((.*)\sfrom(.*);|(((.*)\n){0,})\}\sfrom(.*);)`)
+	// Regex match static export statements.
+	reStaticExport = regexp.MustCompile(`export\s(.*);`)
+	// Replace import references with variable signatures.
+	reStaticImportPath = regexp.MustCompile(`(?:'|").*(?:'|")`)
+	reStaticImportName = regexp.MustCompile(`import\s(.*)\sfrom`)
+	// Match: allComponents["layout_components_decrementer_svelte"]
+	reAllComponentsBracketStr = regexp.MustCompile(`allComponents\[\"(.*)\"\]`)
+	// Match: allComponents.layout_components_grid_svelte
+	reAllComponentsDot = regexp.MustCompile(`allComponents\.(layout_.*_svelte)`)
+	// Match: allComponents[component]
+	reAllComponentsBracket = regexp.MustCompile(`allComponents\[(.*)\]`)
+	// Only add named imports to create_ssr_component().
+	reCreateFunc = regexp.MustCompile(`(create_ssr_component\(\(.*\)\s=>\s\{)`)
+	// Only use comp signatures inside JS template literal placeholders.
+	reTemplatePlaceholder = regexp.MustCompile(`(?s)\$\{validate_component\(.*\)\}`)
+	// Use var instead of const so it can be redeclared multiple times.
+	reConst = regexp.MustCompile(`(?m)^const\s`)
 )
 
 func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
@@ -23,24 +44,28 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	// worked fine for me using one json file, eveything still seemed to update but not tried a folder of content.
 
 	// if we have the content, like ejected/...
-	if common.MapFS[layoutPath].B != nil {
-		component = common.MapFS[layoutPath].B
+	layoutFD := common.GetOrSet(layoutPath)
+	if layoutFD.B != nil {
+		component = layoutFD.B
 	} else {
-		component, err = ioutil.ReadFile(layoutPath)
+		// on disk only
+		component, err = os.ReadFile(layoutPath)
 		if err != nil {
 			return fmt.Errorf("can't read component file: %s %w%s", layoutPath, err, common.Caller())
 		}
 	}
 
-	if common.UseMemFS && strings.HasPrefix(layoutPath, "layout") {
+	if common.UseMemFS {
 
 		// if hash is the same skip. common.MapFS[layoutPath].Hash will be nil initially
-		if common.MapFS[layoutPath].Hash != 0 && common.CRC32Hasher(component) == common.MapFS[layoutPath].Hash {
+		if layoutFD.Hash == common.CRC32Hasher(component) {
 			// Add the orig css as we clear the bundle each build.
 			//  May be a better way to avoid also but cheap enough vs compiling anyway.
-			common.MapFS[stylePath] = common.FData{B: append(common.MapFS[stylePath].B, common.MapFS[layoutPath].CSS...)}
+			val := common.Get(stylePath)
+			val.B = append(val.B, layoutFD.CSS...)
+
 			// need this or complains about missing layout_xxxxx. Some way around?
-			_, err = SSRctx.RunScript(string(common.MapFS[layoutPath].SSR), "create_ssr")
+			_, err = SSRctx.RunScript(string(layoutFD.SSR), "create_ssr")
 			if err != nil {
 				return fmt.Errorf("Could not add SSR Component: %w%s", err, common.Caller())
 			}
@@ -49,11 +74,10 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 		}
 
 		// add or update hash
-		v := common.MapFS[layoutPath]
-		v.Hash = common.CRC32Hasher(component)
-		common.MapFS[layoutPath] = v
+		layoutFD.Hash = common.CRC32Hasher(component)
 
 	}
+
 	componentStr := string(component)
 
 	// Compile component with Svelte.
@@ -70,11 +94,11 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 
 	if common.UseMemFS {
 
-		common.MapFS[destFile] = common.FData{Hash: common.CRC32Hasher(jsBytes), B: jsBytes}
+		common.Set(destFile, &common.FData{Hash: common.CRC32Hasher(jsBytes), B: jsBytes})
 
 	} else {
 
-		err = ioutil.WriteFile(destFile, jsBytes, 0755)
+		err = os.WriteFile(destFile, jsBytes, 0755)
 		if err != nil {
 			return fmt.Errorf("Unable to write compiled client file: %w%s", err, common.Caller())
 		}
@@ -90,12 +114,11 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	if cssStr != "null" {
 		if common.UseMemFS {
 			// ok to append as created on build
-			common.MapFS[stylePath] = common.FData{B: append(common.MapFS[stylePath].B, []byte(cssCode.String())...)}
-			// will reuse just css when no change
+			val := common.Get(stylePath)
+
+			val.B = append(val.B, []byte(cssCode.String())...) // will reuse just layout/component css when no change
 			// could use pointers but this is ok
-			v := common.MapFS[layoutPath]
-			v.CSS = []byte(cssCode.String())
-			common.MapFS[layoutPath] = v
+			layoutFD.CSS = []byte(cssCode.String())
 
 		} else {
 			cssFile, err := os.OpenFile(stylePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -118,16 +141,12 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	if err != nil {
 		return fmt.Errorf("V8go could not get ssrJs.code value: %w%s", err, common.Caller())
 	}
-	// Regex match static import statements.
-	reStaticImport := regexp.MustCompile(`import\s((.*)\sfrom(.*);|(((.*)\n){0,})\}\sfrom(.*);)`)
-	// Regex match static export statements.
-	reStaticExport := regexp.MustCompile(`export\s(.*);`)
+
 	// Remove static import statements.
 	ssrStr := reStaticImport.ReplaceAllString(ssrJsCode.String(), `/*$0*/`)
 	// Remove static export statements.
 	ssrStr = reStaticExport.ReplaceAllString(ssrStr, `/*$0*/`)
 	// Use var instead of const so it can be redeclared multiple times.
-	reConst := regexp.MustCompile(`(?m)^const\s`)
 	ssrStr = reConst.ReplaceAllString(ssrStr, "var ")
 	// Remove temporary theme directory info from path before making a comp signature.
 	layoutPath = strings.TrimPrefix(layoutPath, tempBuildDir)
@@ -154,8 +173,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	}
 
 	// Replace import references with variable signatures.
-	reStaticImportPath := regexp.MustCompile(`(?:'|").*(?:'|")`)
-	reStaticImportName := regexp.MustCompile(`import\s(.*)\sfrom`)
+
 	namedImports := reStaticImport.FindAllString(ssrStr, -1)
 	for _, namedImport := range namedImports {
 		// Get path only from static import statement.
@@ -206,7 +224,6 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 		// Check that there is a valid import to replace.
 		if importNameStr != "" && importSignature != "" {
 			// Only use comp signatures inside JS template literal placeholders.
-			reTemplatePlaceholder := regexp.MustCompile(`(?s)\$\{validate_component\(.*\)\}`)
 			// Only replace this specific variable, so not anything that has letters, underscores, or numbers attached to it.
 			reImportNameUse := regexp.MustCompile(`([^a-zA-Z_0-9])` + importNameStr + `([^a-zA-Z_0-9])`)
 			// Find the template placeholders.
@@ -224,8 +241,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 			currentNamedImport = strings.TrimSpace(currentNamedImport)
 			// Check that there is a valid named import.
 			if currentNamedImport != "" && importSignature != "" {
-				// Only add named imports to create_ssr_component().
-				reCreateFunc := regexp.MustCompile(`(create_ssr_component\(\(.*\)\s=>\s\{)`)
+
 				// Entry should be block scoped, like: let count = layout_scripts_stores_svelte_count;
 				blockScopedVar := "\n let " + currentNamedImport + " = " + importSignature + "_" + currentNamedImport + ";"
 				// Add block scoped var inside create_ssr_component.
@@ -236,13 +252,10 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 
 	// Remove allComponents object (leaving just componentSignature) for SSR.
 	// Match: allComponents.layout_components_grid_svelte
-	reAllComponentsDot := regexp.MustCompile(`allComponents\.(layout_.*_svelte)`)
 	ssrStr = reAllComponentsDot.ReplaceAllString(ssrStr, "${1}")
 	// Match: allComponents[component]
-	reAllComponentsBracket := regexp.MustCompile(`allComponents\[(.*)\]`)
 	ssrStr = reAllComponentsBracket.ReplaceAllString(ssrStr, "globalThis[${1}]")
 	// Match: allComponents["layout_components_decrementer_svelte"]
-	reAllComponentsBracketStr := regexp.MustCompile(`allComponents\[\"(.*)\"\]`)
 	ssrStr = reAllComponentsBracketStr.ReplaceAllString(ssrStr, "${1}")
 
 	paginatedContent, _ := getPagination()
@@ -271,9 +284,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 		return fmt.Errorf("Could not add SSR Component: %w%s", err, common.Caller())
 	}
 	// again store for no change
-	v := common.MapFS[layoutPath]
-	v.SSR = []byte(ssrStr)
-	common.MapFS[layoutPath] = v
+	layoutFD.SSR = []byte(ssrStr)
 
 	return nil
 }

@@ -2,7 +2,7 @@ package common
 
 import (
 	"bytes"
-	"hash/crc32"
+	"encoding/json"
 	"io"
 	"os"
 	pathpkg "path"
@@ -13,33 +13,8 @@ import (
 	"golang.org/x/tools/godoc/vfs"
 )
 
-// MapFS ok
-var MapFS = map[string]FData{}
-
-// FData OK
-type FData struct {
-	// Hash of last check, only applies original files on disk.
-	// TODO: integrate content/css
-	Hash uint32
-	// store content/css/ssr per component/layout
-	B   []byte
-	CSS []byte
-	SSR []byte
-}
-
-var crc32q = crc32.MakeTable(0xD5828281)
-
-// CRC32Hasher is a simple means to check for changes
-func CRC32Hasher(b []byte) uint32 {
-	crc32q := crc32.MakeTable(0xD5828281)
-	return crc32.Checksum(b, crc32q)
-
-}
-
-var s = CRC32Hasher([]byte("hello world"))
-
 // mapFST is the map based implementation of FileSystem
-type mapFST map[string]FData
+type mapFST map[string]*FData
 
 func (fs mapFST) Open(p string) (vfs.ReadSeekCloser, error) {
 
@@ -51,7 +26,18 @@ func (fs mapFST) Open(p string) (vfs.ReadSeekCloser, error) {
 	return nopCloser{bytes.NewReader(b.B)}, nil
 }
 
-func (fs mapFST) String() string { return "mapFST" }
+func (fs mapFST) String() string {
+	s := []string{}
+	for k := range fs {
+		s = append(s, k)
+	}
+	bb, err := json.MarshalIndent(s, "", "    ")
+	if err != nil {
+		return ""
+	}
+
+	return string(bb)
+}
 
 func (fs mapFST) RootType(p string) vfs.RootType {
 	return ""
@@ -60,6 +46,7 @@ func (fs mapFST) RootType(p string) vfs.RootType {
 func (fs mapFST) Close() error { return nil }
 
 func filename(p string) string {
+
 	return strings.TrimPrefix(p, "/")
 }
 
@@ -81,6 +68,7 @@ func (fs mapFST) Lstat(p string) (os.FileInfo, error) {
 	b, ok := fs[filename(p)]
 
 	if ok {
+
 		return fileInfo(p, b.B), nil
 	}
 	ents, _ := fs.ReadDir(p)

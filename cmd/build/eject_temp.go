@@ -27,7 +27,7 @@ func EjectTemp(tempBuildDir string) ([]string, string, error) {
 
 			Log("Temp writing '" + file + "' file.")
 			// Create the current default file
-			common.MapFS[filePath] = common.FData{B: content, Hash: common.CRC32Hasher(content)}
+			common.Set(filePath, &common.FData{B: content, Hash: common.CRC32Hasher(content)})
 
 			tempFiles = append(tempFiles, filePath)
 

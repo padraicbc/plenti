@@ -25,11 +25,11 @@ func EjectCopy(buildPath string, tempBuildDir string, ejectedDir string) error {
 	if common.UseMemFS {
 
 		// Check if the current file is in the excluded list.
-		for k, v := range common.MapFS {
+		for k, v := range common.Iter() {
 			if strings.HasPrefix(k, ejectedDir) && filepath.Ext(k) == ".js" && !excludedFiles[k] {
 
 				destPath := buildPath + "/spa/"
-				common.MapFS[destPath+strings.TrimPrefix(k, tempBuildDir)] = v
+				common.Set(destPath+strings.TrimPrefix(k, tempBuildDir), v)
 				copiedSourceCounter++
 
 			}

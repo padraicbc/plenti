@@ -19,14 +19,14 @@ func NpmDefaults(tempBuildDir string) error {
 
 	destPath := tempBuildDir + "node_modules"
 	if common.UseMemFS {
-		if common.MapFS[destPath].B != nil {
+		if common.Get(destPath) != nil {
 			return nil
 		}
 		for file, content := range generated.Defaults_node_modules {
 			// Make file relative to where CLI is executed
 			file = destPath + "/" + file
 			// Create the directories needed for the current file
-			common.MapFS[file] = common.FData{B: content}
+			common.Set(file, &common.FData{B: content})
 
 		}
 		return nil

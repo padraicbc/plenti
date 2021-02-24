@@ -35,24 +35,25 @@ func Gopack(buildPath string) error {
 			}
 			// Only get ESM supported files.
 			if !moduleFileInfo.IsDir() && filepath.Ext(modulePath) == ".mjs" {
+				key := modulePath
+				// Remove "node_modules" from path and add "web_modules".
+				modulePath = gopackDir + strings.Replace(modulePath, "node_modules", "", 1)
+				// in memory so just store
+				if common.UseMemFS {
+					// prob need to not store in mem and use os.Open as below.
+					// Still have to filter out what shoukd be stored in mem
+					// likely mostly ejected/assets/layout and other iles going to/needed in builddir
+					common.Set(strings.TrimSuffix(modulePath, filepath.Ext(modulePath))+".js",
+						&common.FData{B: common.Get(key).B})
+					// don't need keep orig
+					common.Del(key)
+					return nil
+				}
 				from, err := os.Open(modulePath)
 				if err != nil {
 					return fmt.Errorf("Could not open source .mjs %s file for copying: %w%s", modulePath, err, common.Caller())
 				}
 				defer from.Close()
-
-				// Remove "node_modules" from path and add "web_modules".
-				modulePath = gopackDir + strings.Replace(modulePath, "node_modules", "", 1)
-				// in memory so just store
-				if common.UseMemFS {
-					b, err := ioutil.ReadAll(from)
-					if err != nil {
-						return fmt.Errorf("Could not open source .mjs file for copying: %w%s", err, common.Caller())
-					}
-					common.MapFS[strings.TrimSuffix(modulePath, filepath.Ext(modulePath))+".js"] = common.FData{B: b}
-
-					return nil
-				}
 
 				// Create any subdirectories need to write file to "web_modules" destination.
 				if err = os.MkdirAll(filepath.Dir(modulePath), os.ModePerm); err != nil {
@@ -79,17 +80,22 @@ func Gopack(buildPath string) error {
 
 	}
 	if common.UseMemFS {
+		// These could be stored elsewhere, sorted once and keep sorted so we have log n lookups/inserts using bisect logic
+		// relates to mimicking walk which is possible but likely faster ways to do it using multiple maps/buckets...
+		// only an issue when you have a whole lot of files. Walk is not overly efficient either.
+		// The foundPath logic probably could be changed removing the need for any of this.
 		keys := []string{}
 
-		for k := range common.MapFS {
+		for k := range common.Iter() {
 			keys = append(keys, k)
+
 		}
 		// want to start wirth shortest so we mimic starting at subdir
 		sort.Slice(keys, func(i, j int) bool {
 			return len(keys[i]) < len(keys[j])
 		})
 
-		for convertPath, data := range common.MapFS {
+		for convertPath, data := range common.Iter() {
 			contentBytes := data.B
 
 			if !strings.HasPrefix(convertPath, buildPath+"/spa") {
@@ -144,26 +150,14 @@ func Gopack(buildPath string) error {
 					fullPath = strings.Replace(fullPath, ".svelte", ".js", 1)
 					foundPath = fullPath
 				}
-
+				file := filepath.Clean(fullPath)
 				// If the import/export points to a path that exists and it is a .js file (imports must reference the file specifically) then we don't need to convert anything.
-				if common.MapFS[fullPath].B != nil && filepath.Ext(fullPath) == ".js" {
+				if common.Get(file) != nil && filepath.Ext(file) == ".js" {
 					// error?
 					Log("Skipping converting import/export in " + convertPath + " because import/export is valid: " + string(staticStatement))
 				} else if pathStr[:1] == "." {
 					// If the import/export path starts with a dot (.) or double dot (..) look for the file it's trying to import from this relative path.
-					// findRelativePathErr := vfsutil.Walk(common.MapFS(common.MapFS), fullPath, func(relativePath string, relativePathFileInfo os.FileInfo, err error) error {
-					var file string
-					if strings.Contains(fullPath, "/../") {
-						// public/spa/web_modules/svelte/animate/../easing
-						// go back one
-						spl := strings.Split(fullPath, "/../")
-						ppre, fl := spl[0], spl[1]
-						pre := ppre[:strings.LastIndex(ppre, "/")]
-						file = fmt.Sprintf("%s/%s", pre, fl)
 
-					} else if strings.Contains(fullPath, "/./") {
-						file = strings.Replace(fullPath, "/./", "/", 1)
-					}
 					if len(file) > 0 {
 
 						for _, k := range keys {
@@ -217,9 +211,9 @@ func Gopack(buildPath string) error {
 			}
 
 			// Overwrite the old file with the new content that contains the updated import path.
-			// issue with removing prefix in serve and oveewriting with so we remove any  with buildDir.
-			delete(common.MapFS, convertPath)
-			common.MapFS[common.NormPaths(convertPath)] = common.FData{B: contentBytes}
+			// issue with removing prefix in serve and overwriting with so we remove any  with buildDir.
+			common.Del(convertPath)
+			common.Set((convertPath), &common.FData{B: contentBytes})
 
 		}
 		return nil
