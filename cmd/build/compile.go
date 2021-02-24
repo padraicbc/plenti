@@ -54,8 +54,8 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 			return fmt.Errorf("can't read component file: %s %w%s", layoutPath, err, common.Caller())
 		}
 	}
-
-	if common.UseMemFS {
+	// will break router if no layitu check
+	if common.UseMemFS && strings.HasPrefix(layoutPath, "layout") {
 
 		// if hash is the same skip. common.MapFS[layoutPath].Hash will be nil initially
 		if layoutFD.Hash == common.CRC32Hasher(component) {
