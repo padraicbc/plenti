@@ -13,9 +13,9 @@ import (
 
 var (
 	// Regex match static import statements.
-	reStaticImport = regexp.MustCompile(`import\s((.*)\sfrom(.*);|(((.*)\n){0,})\}\sfrom(.*);)`)
+	reStaticImportComp = regexp.MustCompile(`import\s((.*)\sfrom(.*);|(((.*)\n){0,})\}\sfrom(.*);)`)
 	// Regex match static export statements.
-	reStaticExport = regexp.MustCompile(`export\s(.*);`)
+	reStaticExportComp = regexp.MustCompile(`export\s(.*);`)
 	// Replace import references with variable signatures.
 	reStaticImportPath = regexp.MustCompile(`(?:'|").*(?:'|")`)
 	reStaticImportName = regexp.MustCompile(`import\s(.*)\sfrom`)
@@ -62,6 +62,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 			// Add the orig css as we clear the bundle each build.
 			//  May be a better way to avoid also but cheap enough vs compiling anyway.
 			val := common.Get(stylePath)
+			// layoutFD.CSS is the specific component css already compiled
 			val.B = append(val.B, layoutFD.CSS...)
 
 			// need this or complains about missing layout_xxxxx. Some way around?
@@ -80,7 +81,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 
 	componentStr := string(component)
 
-	// Compile component with Svelte.
+	// Compile component with Svelte. TODO: could probaly just pull code where no changes so avoid this step altogether too
 	_, err = ctx.RunScript("var { js, css } = svelte.compile(`"+componentStr+"`, {css: false, hydratable: true});", "compile_svelte")
 	if err != nil {
 		return fmt.Errorf("can't compile component file %s with Svelte: %w%s", layoutPath, err, common.Caller())
@@ -93,7 +94,6 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	jsBytes := []byte(jsCode.String())
 
 	if common.UseMemFS {
-
 		common.Set(destFile, &common.FData{Hash: common.CRC32Hasher(jsBytes), B: jsBytes})
 
 	} else {
@@ -143,9 +143,9 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	}
 
 	// Remove static import statements.
-	ssrStr := reStaticImport.ReplaceAllString(ssrJsCode.String(), `/*$0*/`)
+	ssrStr := reStaticImportComp.ReplaceAllString(ssrJsCode.String(), `/*$0*/`)
 	// Remove static export statements.
-	ssrStr = reStaticExport.ReplaceAllString(ssrStr, `/*$0*/`)
+	ssrStr = reStaticExportComp.ReplaceAllString(ssrStr, `/*$0*/`)
 	// Use var instead of const so it can be redeclared multiple times.
 	ssrStr = reConst.ReplaceAllString(ssrStr, "var ")
 	// Remove temporary theme directory info from path before making a comp signature.
@@ -155,7 +155,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	// Use signature instead of generic "Component". Add space to avoid also replacing part of "loadComponent".
 	ssrStr = strings.ReplaceAll(ssrStr, " Component ", " "+componentSignature+" ")
 
-	namedExports := reStaticExport.FindAllStringSubmatch(ssrStr, -1)
+	namedExports := reStaticExportComp.FindAllStringSubmatch(ssrStr, -1)
 	// Loop through all export statements.
 	for _, namedExport := range namedExports {
 		// Get exported functions that aren't default.
@@ -174,7 +174,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 
 	// Replace import references with variable signatures.
 
-	namedImports := reStaticImport.FindAllString(ssrStr, -1)
+	namedImports := reStaticImportComp.FindAllString(ssrStr, -1)
 	for _, namedImport := range namedImports {
 		// Get path only from static import statement.
 		importPath := reStaticImportPath.FindString(namedImport)

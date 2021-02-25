@@ -56,7 +56,8 @@ type FData struct {
 	// of which we combine all.
 	CSS []byte
 	// Used to store prev compiled ssr which is reused if no changes to layout file.
-	SSR []byte
+	SSR       []byte
+	Processed bool
 }
 
 var crc32q = crc32.MakeTable(0xD5828281)

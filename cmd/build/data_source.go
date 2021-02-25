@@ -17,6 +17,23 @@ import (
 // Doreload and other flags should probably be part of a config accessible across build.
 // It gets set using server flags.
 var Doreload bool
+var (
+	// Setup regex to find field name.
+	reField = regexp.MustCompile(`:field\((.*?)\)`)
+	// Setup regex to find pagination and a leading forward slash.
+	rePaginate = regexp.MustCompile(`/:paginate\((.*?)\)`)
+
+	// Create regex for allowed characters when slugifying path.
+	reSlugify = regexp.MustCompile("[^a-z0-9/]+")
+	// Remove newlines.
+	reN = regexp.MustCompile(`\r?\n`)
+
+	// Remove tabs.
+	reT = regexp.MustCompile(`\t`)
+
+	// Reduce extra whitespace to a single space.
+	reS = regexp.MustCompile(`\s+`)
+)
 
 // inject wherever/however, this is just to get it working.
 
@@ -155,8 +172,7 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 
 				// Get field key/values from content source.
 				typeFields := readers.GetTypeFields(fileContentBytes)
-				// Setup regex to find field name.
-				reField := regexp.MustCompile(`:field\((.*?)\)`)
+
 				// Check for path overrides from plenti.json config file.
 				for configContentType, slug := range siteConfig.Types {
 					if configContentType == contentType {
@@ -180,8 +196,6 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 					}
 				}
 
-				// Setup regex to find pagination and a leading forward slash.
-				rePaginate := regexp.MustCompile(`/:paginate\((.*?)\)`)
 				// Initialize vars for path with replacement patterns still intact.
 				var pagerPath string
 				var pagerDestPath string
@@ -200,8 +214,6 @@ func DataSource(buildPath string, siteConfig readers.SiteConfig, tempBuildDir st
 					}
 				}
 
-				// Create regex for allowed characters when slugifying path.
-				reSlugify := regexp.MustCompile("[^a-z0-9/]+")
 				// Slugify output using reSlugify regex defined above.
 				path = strings.Trim(reSlugify.ReplaceAllString(strings.ToLower(path), "-"), "-")
 
@@ -460,13 +472,13 @@ func writeContentJS(contentJSPath string, contentDetailsStr string) error {
 
 func encodeString(encodedStr string) string {
 	// Remove newlines.
-	reN := regexp.MustCompile(`\r?\n`)
+
 	encodedStr = reN.ReplaceAllString(encodedStr, " ")
 	// Remove tabs.
-	reT := regexp.MustCompile(`\t`)
+
 	encodedStr = reT.ReplaceAllString(encodedStr, " ")
 	// Reduce extra whitespace to a single space.
-	reS := regexp.MustCompile(`\s+`)
+
 	encodedStr = reS.ReplaceAllString(encodedStr, " ")
 	return encodedStr
 }

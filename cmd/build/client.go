@@ -15,6 +15,13 @@ import (
 	"rogchap.com/v8go"
 )
 
+var (
+	// Match var css = { ... }
+	reCSS = regexp.MustCompile(`var(\s)css(\s)=(\s)\{(.*\n){0,}\};`)
+	// Setup regex to find pagination.
+	rePaginateCli = regexp.MustCompile(`:paginate\((.*?)\)`)
+)
+
 // SSRctx is a v8go context for loaded with components needed to render HTML.
 var SSRctx *v8go.Context
 
@@ -26,6 +33,7 @@ func Client(buildPath string, tempBuildDir string, ejectedPath string) error {
 	Log("\nCompiling client SPA with svelte")
 
 	stylePath := buildPath + "/spa/bundle.css"
+	// clear styles as we append bytes.
 	common.Set(stylePath, &common.FData{})
 
 	// Initialize string for layout.js component list.
@@ -176,8 +184,7 @@ func Client(buildPath string, tempBuildDir string, ejectedPath string) error {
 }
 
 func removeCSS(str string) string {
-	// Match var css = { ... }
-	reCSS := regexp.MustCompile(`var(\s)css(\s)=(\s)\{(.*\n){0,}\};`)
+
 	// Delete these styles because they often break pagination SSR.
 	return reCSS.ReplaceAllString(str, "")
 }
@@ -210,8 +217,7 @@ type pager struct {
 func getPagination() ([]pager, *regexp.Regexp) {
 	// Get settings from config file.
 	siteConfig, _ := readers.GetSiteConfig(".")
-	// Setup regex to find pagination.
-	rePaginate := regexp.MustCompile(`:paginate\((.*?)\)`)
+
 	// Initialize new pager struct
 	var pagers []pager
 	// Check for pagination in plenti.json config file.
@@ -219,7 +225,7 @@ func getPagination() ([]pager, *regexp.Regexp) {
 		// Initialize list of all :paginate() vars in a given slug.
 		replacements := []string{}
 		// Find every instance of :paginate() in the slug.
-		paginateReplacements := rePaginate.FindAllStringSubmatch(slug, -1)
+		paginateReplacements := rePaginateCli.FindAllStringSubmatch(slug, -1)
 		// Loop through all :paginate() replacements found in config file.
 		for _, replacement := range paginateReplacements {
 			// Add the variable name defined within the brackets to the list.

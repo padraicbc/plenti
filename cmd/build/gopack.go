@@ -15,6 +15,23 @@ import (
 	"time"
 )
 
+var (
+	// Match dynamic import statments, e.g. import("") or import('').
+	reDynamicImport = regexp.MustCompile(`import\((?:'|").*(?:'|")\)`)
+	// Find any import statement in the file (including multiline imports).
+	// () = brackets for grouping
+	// \s = space
+	// .* = any character
+	// | = or statement
+	// \n = newline
+	// {0,} = repeat any number of times
+	// \{ = just a closing curly bracket (escaped)
+	reStaticImport = regexp.MustCompile(`import(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
+	reStaticExport = regexp.MustCompile(`export(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
+	// Find the path specifically (part between single or double quotes).
+	rePath = regexp.MustCompile(`(?:'|").*(?:'|")`)
+)
+
 // Gopack ensures ESM support for NPM dependencies.
 func Gopack(buildPath string) error {
 
@@ -25,6 +42,7 @@ func Gopack(buildPath string) error {
 	Log("\nRunning gopack to build esm support for npm dependencies:")
 
 	// Find all the "dependencies" specified in package.json.
+
 	for module, version := range readers.GetNpmConfig().Dependencies {
 		Log("- " + module + ", version " + version)
 		// Walk through all sub directories of each dependency declared.
@@ -38,12 +56,19 @@ func Gopack(buildPath string) error {
 				key := modulePath
 				// Remove "node_modules" from path and add "web_modules".
 				modulePath = gopackDir + strings.Replace(modulePath, "node_modules", "", 1)
+				modulePath = strings.TrimSuffix(modulePath, filepath.Ext(modulePath)) + ".js"
 				// in memory so just store
 				if common.UseMemFS {
-					// prob need to not store in mem and use os.Open as below.
-					// Still have to filter out what shoukd be stored in mem
-					// likely mostly ejected/assets/layout and other iles going to/needed in builddir
-					common.Set(strings.TrimSuffix(modulePath, filepath.Ext(modulePath))+".js",
+					// Already seen so set to processed and skip.
+					// This is a naive approach as maybe an npm update would change content?...
+					if v := common.Get(modulePath); v != nil {
+						v.Processed = true
+						return nil
+					}
+
+					// Still have to filter out what should be stored in mem
+					// likely mostly ejected/assets/layout and other files going to/needed in builddir
+					common.Set(modulePath,
 						&common.FData{B: common.Get(key).B})
 					// don't need keep orig
 					common.Del(key)
@@ -79,6 +104,7 @@ func Gopack(buildPath string) error {
 		}
 
 	}
+
 	if common.UseMemFS {
 		// These could be stored elsewhere, sorted once and keep sorted so we have log n lookups/inserts using bisect logic
 		// relates to mimicking walk which is possible but likely faster ways to do it using multiple maps/buckets...
@@ -97,15 +123,17 @@ func Gopack(buildPath string) error {
 
 		for convertPath, data := range common.Iter() {
 			contentBytes := data.B
-
-			if !strings.HasPrefix(convertPath, buildPath+"/spa") {
+			// Already seen so will have had import sorted.
+			// Maybe all copied over files should be sored elsewhere once and remove from gopack completely but this works for now.
+			if v := common.Get(convertPath); v != nil && v.Processed {
 				continue
 			}
 
-			// Match dynamic import statments, e.g. import("") or import('').
-			reDynamicImport := regexp.MustCompile(`import\((?:'|").*(?:'|")\)`)
-			// Created byte array of all dynamic imports in the current file.
+			if !strings.HasSuffix(convertPath, ".js") || !strings.HasPrefix(convertPath, buildPath+"/spa") {
+				continue
+			}
 
+			// Created byte array of all dynamic imports in the current file.
 			dynamicImportPaths := reDynamicImport.FindAll(contentBytes, -1)
 			for _, dynamicImportPath := range dynamicImportPaths {
 
@@ -124,8 +152,6 @@ func Gopack(buildPath string) error {
 			// \n = newline
 			// {0,} = repeat any number of times
 			// \{ = just a closing curly bracket (escaped)
-			reStaticImport := regexp.MustCompile(`import(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
-			reStaticExport := regexp.MustCompile(`export(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
 			// Get all the import statements.
 			staticImportStatements := reStaticImport.FindAll(contentBytes, -1)
 			// Get all the export statements.
@@ -133,8 +159,7 @@ func Gopack(buildPath string) error {
 			// Get all import and export statements.
 			allStaticStatements := append(staticImportStatements, staticExportStatements...)
 			for _, staticStatement := range allStaticStatements {
-				// Find the path specifically (part between single or double quotes).
-				rePath := regexp.MustCompile(`(?:'|").*(?:'|")`)
+
 				// Get path from the full import/export statement.
 				pathBytes := rePath.Find(staticStatement)
 				// Convert path to a string.
@@ -171,26 +196,22 @@ func Gopack(buildPath string) error {
 						}
 					}
 
-				} else {
-					// todo: check why + pathStr was there
+				} else if foundPath == "" {
+
 					// A named import/export is being used, look for this in "web_modules/" dir.
 					namedPath := buildPath + "/spa/web_modules/" + pathStr
 
 					// Check all files in the current directory first.
 
-					if foundPath == "" {
+					for _, k := range keys {
+						if strings.HasPrefix(k, namedPath) && strings.HasSuffix(k, ".js") {
 
-						for _, k := range keys {
+							foundPath = k
+							break
 
-							if strings.HasPrefix(k, namedPath) && strings.HasSuffix(k, ".js") {
-
-								foundPath = k
-								break
-
-							}
 						}
-
 					}
+
 				}
 
 				if foundPath != "" {
@@ -211,8 +232,6 @@ func Gopack(buildPath string) error {
 			}
 
 			// Overwrite the old file with the new content that contains the updated import path.
-			// issue with removing prefix in serve and overwriting with so we remove any  with buildDir.
-			common.Del(convertPath)
 			common.Set((convertPath), &common.FData{B: contentBytes})
 
 		}
@@ -229,8 +248,6 @@ func Gopack(buildPath string) error {
 				return fmt.Errorf("Could not read file %s to convert to esm: %w%s", convertPath, err, common.Caller())
 			}
 
-			// Match dynamic import statments, e.g. import("") or import('').
-			reDynamicImport := regexp.MustCompile(`import\((?:'|").*(?:'|")\)`)
 			// Created byte array of all dynamic imports in the current file.
 			dynamicImportPaths := reDynamicImport.FindAll(contentBytes, -1)
 			for _, dynamicImportPath := range dynamicImportPaths {
@@ -248,8 +265,7 @@ func Gopack(buildPath string) error {
 			// \n = newline
 			// {0,} = repeat any number of times
 			// \{ = just a closing curly bracket (escaped)
-			reStaticImport := regexp.MustCompile(`import(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
-			reStaticExport := regexp.MustCompile(`export(\s)(.*from(.*);|((.*\n){0,})\}(\s)from(.*);)`)
+
 			// Get all the import statements.
 			staticImportStatements := reStaticImport.FindAll(contentBytes, -1)
 			// Get all the export statements.
@@ -258,7 +274,7 @@ func Gopack(buildPath string) error {
 			allStaticStatements := append(staticImportStatements, staticExportStatements...)
 			for _, staticStatement := range allStaticStatements {
 				// Find the path specifically (part between single or double quotes).
-				rePath := regexp.MustCompile(`(?:'|").*(?:'|")`)
+
 				// Get path from the full import/export statement.
 				pathBytes := rePath.Find(staticStatement)
 				// Convert path to a string.
@@ -328,7 +344,8 @@ func Gopack(buildPath string) error {
 					// Find the specific import statement we're replacing.
 					reFoundImport := regexp.MustCompile(string(staticStatement))
 					// Actually replace the path to the dependency in the source content.
-					contentBytes = reFoundImport.ReplaceAll(contentBytes, rePath.ReplaceAll(staticStatement, rePath.ReplaceAll(pathBytes, replacePathBytes)))
+					contentBytes = reFoundImport.ReplaceAll(contentBytes,
+						rePath.ReplaceAll(staticStatement, rePath.ReplaceAll(pathBytes, replacePathBytes)))
 				}
 			}
 			// Overwrite the old file with the new content that contains the updated import path.
@@ -354,6 +371,7 @@ func findJSFile(path string) string {
 		if filepath.Ext(f.Name()) == ".js" {
 			foundPath = path + "/" + f.Name()
 			Log("The found import path to use is: " + foundPath)
+			break
 		}
 	}
 	if err != nil {
