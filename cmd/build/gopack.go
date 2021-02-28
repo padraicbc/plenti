@@ -81,7 +81,7 @@ func Gopack(buildPath string) error {
 					// likely mostly ejected/assets/layout and other files going to/needed in builddir
 					// generated.Defaults_node_modules has the defaults. maybe we should just store those...
 					if b, ok := generated.Defaults_node_modules[modulePath]; ok {
-						common.Set(buildPath+outPath,
+						common.Set(outPathFile,
 							&common.FData{B: b})
 
 					} else {
@@ -89,7 +89,7 @@ func Gopack(buildPath string) error {
 						if err != nil {
 							return fmt.Errorf("Could not read source .mjs %s file for copying: %w%s", modulePath, err, common.Caller())
 						}
-						common.Set(buildPath+outPath,
+						common.Set(outPathFile,
 							&common.FData{B: b})
 
 					}

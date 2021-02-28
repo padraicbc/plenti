@@ -79,7 +79,7 @@ var serveCmd = &cobra.Command{
 		// Point to folder containing the built site
 		if common.UseMemFS {
 
-			fs = common.NewFS()
+			fs = common.NewH(buildDir)
 
 		} else {
 
