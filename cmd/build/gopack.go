@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"plenti/common"
+	"plenti/generated"
 	"plenti/readers"
 	"regexp"
 	"sort"
@@ -51,42 +52,56 @@ func Gopack(buildPath string) error {
 			if err != nil {
 				return fmt.Errorf("can't stat %s: %w", modulePath, err)
 			}
+
 			// Only get ESM supported files.
 			if !moduleFileInfo.IsDir() && filepath.Ext(modulePath) == ".mjs" {
-				key := modulePath
+
+				from, err := os.Open(modulePath)
+				if err != nil {
+					return fmt.Errorf("Could not open source .mjs %s file for copying: %w%s", modulePath, err, common.Caller())
+				}
+
+				defer from.Close()
 				// Remove "node_modules" from path and add "web_modules".
-				modulePath = gopackDir + strings.Replace(modulePath, "node_modules", "", 1)
-				modulePath = strings.TrimSuffix(modulePath, filepath.Ext(modulePath)) + ".js"
+				outPath := gopackDir + strings.Replace(modulePath, "node_modules", "", 1)
+				outPathFile := strings.TrimSuffix(outPath, filepath.Ext(modulePath)) + ".js"
+				if err != nil {
+					return fmt.Errorf("Could not open source .mjs %s file for copying: %w%s", modulePath, err, common.Caller())
+				}
 				// in memory so just store
 				if common.UseMemFS {
 					// Already seen so set to processed and skip.
 					// This is a naive approach as maybe an npm update would change content?...
-					if v := common.Get(modulePath); v != nil {
+					if v := common.Get(outPathFile); v != nil {
 						v.Processed = true
 						return nil
 					}
 
 					// Still have to filter out what should be stored in mem
 					// likely mostly ejected/assets/layout and other files going to/needed in builddir
-					common.Set(modulePath,
-						&common.FData{B: common.Get(key).B})
-					// don't need keep orig
-					common.Del(key)
+					// generated.Defaults_node_modules has the defaults. maybe we should just store those...
+					if b, ok := generated.Defaults_node_modules[modulePath]; ok {
+						common.Set(buildPath+outPath,
+							&common.FData{B: b})
+
+					} else {
+						b, err := ioutil.ReadAll(from)
+						if err != nil {
+							return fmt.Errorf("Could not read source .mjs %s file for copying: %w%s", modulePath, err, common.Caller())
+						}
+						common.Set(buildPath+outPath,
+							&common.FData{B: b})
+
+					}
 					return nil
 				}
-				from, err := os.Open(modulePath)
-				if err != nil {
-					return fmt.Errorf("Could not open source .mjs %s file for copying: %w%s", modulePath, err, common.Caller())
-				}
-				defer from.Close()
 
 				// Create any subdirectories need to write file to "web_modules" destination.
-				if err = os.MkdirAll(filepath.Dir(modulePath), os.ModePerm); err != nil {
+				if err = os.MkdirAll(filepath.Dir(outPath), os.ModePerm); err != nil {
 					return fmt.Errorf("Could not create subdirectories %s: %w%s", filepath.Dir(modulePath), err, common.Caller())
 				}
 				// Change the .mjs file extension to .js.
-				modulePath = strings.TrimSuffix(modulePath, filepath.Ext(modulePath)) + ".js"
-				to, err := os.Create(modulePath)
+				to, err := os.Create(outPathFile)
 				if err != nil {
 					return fmt.Errorf("Could not create destination %s file for copying: %w%s", modulePath, err, common.Caller())
 				}
