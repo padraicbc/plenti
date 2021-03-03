@@ -92,8 +92,7 @@ func (w *watcher) watch(buildPath string) {
 				// only build if there was an event.
 				if len(events) > 0 {
 					// if locked i.e still building from last then this will do nothing.
-					// Can queue build with a mutx but gets messy quickly if you have 3-4 quick ctrl-s with one right after next.
-
+					// Can queue build with a mutex but gets messy quickly if you have 3-4 quick ctrl-s with one right after next.
 					if !common.IsBuilding() {
 						err := Build()
 						// will be unlocked when we receive loaded message from ws in window.onload

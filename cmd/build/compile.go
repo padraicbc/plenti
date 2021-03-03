@@ -44,6 +44,7 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 	// worked fine for me using one json file, eveything still seemed to update but not tried a folder of content.
 
 	// if we have the content, like ejected/...
+
 	layoutFD := common.GetOrSet(layoutPath)
 	if layoutFD.B != nil {
 		component = layoutFD.B
@@ -55,8 +56,8 @@ func compileSvelte(ctx *v8go.Context, SSRctx *v8go.Context, layoutPath string,
 		}
 	}
 
-	// will break router if no layout check
-	if common.UseMemFS && strings.HasPrefix(layoutPath, "layout") {
+	// will break router if no layout check and can't use HasPrefix as themes breaks that
+	if common.UseMemFS && strings.Contains(layoutPath, "layout/") {
 
 		// if hash is the same skip. common.MapFS[layoutPath].Hash will be nil initially
 		if layoutFD.Hash > 0 && layoutFD.Hash == common.CRC32Hasher(component) {
