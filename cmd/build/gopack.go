@@ -190,6 +190,7 @@ func Gopack(buildPath string) error {
 					fullPath = strings.Replace(fullPath, ".svelte", ".js", 1)
 					foundPath = fullPath
 				}
+				// clean so matches logic on Set....
 				file := filepath.Clean(fullPath)
 				// If the import/export points to a path that exists and it is a .js file (imports must reference the file specifically) then we don't need to convert anything.
 				if common.Get(file) != nil && filepath.Ext(file) == ".js" {
@@ -217,7 +218,6 @@ func Gopack(buildPath string) error {
 					namedPath := buildPath + "/spa/web_modules/" + pathStr
 
 					// Check all files in the current directory first.
-
 					for _, k := range keys {
 						if strings.HasPrefix(k, namedPath) && strings.HasSuffix(k, ".js") {
 
@@ -231,7 +231,7 @@ func Gopack(buildPath string) error {
 
 				if foundPath != "" {
 					// Remove "public" build dir from path.
-					replacePath := strings.Replace(foundPath, buildPath, "", 1)
+					replacePath := filepath.Clean(strings.Replace(foundPath, buildPath, "", 1))
 					// Wrap path in quotes.
 					replacePath = "'" + replacePath + "'"
 					// Convert string path to bytes.
