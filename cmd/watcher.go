@@ -96,8 +96,8 @@ func (w *watcher) watch(buildPath string) {
 					if !common.IsBuilding() {
 						err := Build()
 						// will be unlocked when we receive loaded message from ws in window.onload
-						// if any error leave as is.
-						if err == nil && build.Doreload {
+						// if any error leave as is. Shoud never send on channel if no connections or it will hang forever..
+						if err == nil && build.Doreload && len(connections) > 0 {
 							reloadC <- struct{}{}
 						} else {
 							// not reloading so just unlock
